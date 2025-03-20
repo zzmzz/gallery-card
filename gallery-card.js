@@ -4,7 +4,7 @@ import {
   LitElement,
   html,
   css
-} from "https://unpkg.com/lit-element@2.0.1/lit-element.js?module";
+} from "https://cdn.jsdelivr.net/npm/lit-element@2.4.0/+esm?module";
 
 import "https://unpkg.com/dayjs@1.11.7/dayjs.min.js?module";
 import "https://unpkg.com/dayjs@1.11.7/plugin/customParseFormat.js?module";
