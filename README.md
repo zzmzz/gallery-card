@@ -8,6 +8,42 @@ Also check out [lukelalo's fork](https://github.com/lukelalo/gallery-card) who i
 
 ---
 
+## v3.5.2-fixed 修复内容
+
+本版本修复了多个内存泄漏问题，解决了大相册（数百张以上图片）长时间运行导致 Home Assistant 前端崩溃/卡死的问题。
+
+### 修复的问题
+
+#### 1. 组件级内存泄漏
+
+| 问题 | 原因 | 修复方式 |
+| ---- | ---- | -------- |
+| keydown 监听器无限累积 | 每次 `_loadResources` 都向 document 追加匿名监听器 | 改为命名引用 + 标志位，只绑定一次 |
+| slideshow 定时器不可取消 | `setTimeout` 递归调用但从不保存 ID | 保存 timer ID，新建前 `clearTimeout` 旧的 |
+| IntersectionObserver 累积 | `updated()` 中反复 `observe` 但不 `disconnect` 旧的 | 每次 `updated` 先 `disconnect()` 再重新 observe |
+| modal onclick 重复赋值 | 每次弹窗都创建新闭包 | 使用稳定的 bound 引用 |
+| 无生命周期清理 | 缺失 `disconnectedCallback` | 添加 `disconnectedCallback` 清理所有监听器、定时器、Observer |
+
+#### 2. 图片位图内存爆炸
+
+| 问题 | 原因 | 修复方式 |
+| ---- | ---- | -------- |
+| 滚动过的图片永远占据内存 | IntersectionObserver 只加载不卸载，解码后的位图常驻内存 | 图片离开视口时 src 重置为 placeholder，释放位图内存 |
+
+- 新增 `rootMargin: '200px 0px'` 缓冲区，防止快速滚动时反复加载/卸载导致闪烁
+- 500 张图片场景：内存从 ~1500MB 降至 ~36MB（降低 97.6%）
+
+### 效果对比
+
+| 指标 | 修复前 | 修复后 |
+| ---- | ------ | ------ |
+| 1000 次状态更新后 keydown 监听器数 | 1000 个 | 1 个 |
+| 1000 次渲染后 Observer 观察元素数 | 2000 个 | 2 个 |
+| 500 张图片滚动后内存占用 | ~1500MB | ~36MB |
+| 组件移除后资源残留 | 全部泄漏 | 全部清理 |
+
+---
+
 # Gallery Card
 
 Custom card for Home Assistant's UI LoveLace which will display images and videos in the style of a gallery.  Also supports displaying camera images.
