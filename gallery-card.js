@@ -88,6 +88,7 @@ class GalleryCard extends LitElement {
   }
 
   _downloadingVideos = false;
+  _loadingResources = false;
   _keyListenerAttached = false;
   _slideshowTimer = null;
   _boundKeyNav = null;
@@ -211,7 +212,7 @@ class GalleryCard extends LitElement {
   set hass(hass) {
     this._hass = hass;
 
-    if (this.resources == null)
+    if (this.resources == null || (this.resources.length === 0 && !this._loadingResources))
       this._loadResources(this._hass);
   }
 
@@ -393,6 +394,7 @@ class GalleryCard extends LitElement {
   _loadResources(hass) {
     var commands = [];
 
+    this._loadingResources = true;
     this.currentResourceIndex = undefined;
     this.resources = [];
     if(this.selectedDate==null)
@@ -522,6 +524,8 @@ class GalleryCard extends LitElement {
           message: 'Gallery Card Error:  ' + error.message + '   ' + error.entity
         });
       });
+
+      this._loadingResources = false;
     });
   }
 
