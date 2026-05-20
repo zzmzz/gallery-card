@@ -133,14 +133,22 @@ class GalleryCard extends LitElement {
     dayjs.extend(dayjs_plugin_customParseFormat);
     dayjs.extend(dayjs_plugin_relativeTime);
 
+    this._placeholderSrc = "/local/community/gallery-card/placeholder.jpg";
+    // rootMargin 上下各扩展 200px，避免快速滚动时反复加载/卸载造成闪烁
     this.imageObserver = new IntersectionObserver((entries, imgObserver) => {
         entries.forEach((entry) => {
+            const lazyImage = entry.target;
             if (entry.isIntersecting) {
-                const lazyImage = entry.target
-                lazyImage.src = lazyImage.dataset.src
+                if (lazyImage.dataset.src) {
+                    lazyImage.src = lazyImage.dataset.src;
+                }
+            } else {
+                if (lazyImage.tagName === 'IMG' && lazyImage.dataset.src && lazyImage.src !== this._placeholderSrc) {
+                    lazyImage.src = this._placeholderSrc;
+                }
             }
         })
-    });
+    }, { rootMargin: '200px 0px' });
     if (!config.entity && !config.entities) {
       throw new Error("Required configuration for entities is missing");
     }

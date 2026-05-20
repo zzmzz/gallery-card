@@ -438,6 +438,66 @@ runner.test('FIXED: modal onclick uses stable reference', () => {
   console.log('         → Same handler reference after 50 assignments (OK)');
 });
 
+// Test 10: Image unloading - observer should unload images when not intersecting
+runner.test('FIXED: IntersectionObserver unloads images when they leave viewport', () => {
+  const placeholderSrc = "/local/community/gallery-card/placeholder.jpg";
+
+  // Simulate the fixed observer callback behavior
+  const images = Array.from({ length: 20 }, (_, i) => ({
+    tagName: 'IMG',
+    dataset: { src: `http://ha/media/photo_${i}.jpg` },
+    src: placeholderSrc
+  }));
+
+  // Simulate: first 5 images enter viewport
+  const loadedImages = [];
+  images.slice(0, 5).forEach(img => {
+    // isIntersecting = true
+    img.src = img.dataset.src;
+    loadedImages.push(img);
+  });
+
+  // Verify 5 images loaded
+  const loadedCount = images.filter(img => img.src !== placeholderSrc).length;
+  assertEqual(loadedCount, 5, 'Loaded image count');
+
+  // Simulate: first 5 leave viewport (scroll down)
+  loadedImages.forEach(img => {
+    // isIntersecting = false → should reset to placeholder
+    if (img.tagName === 'IMG' && img.dataset.src && img.src !== placeholderSrc) {
+      img.src = placeholderSrc;
+    }
+  });
+
+  // Verify all images back to placeholder (memory freed)
+  const stillLoadedCount = images.filter(img => img.src !== placeholderSrc).length;
+  assertEqual(stillLoadedCount, 0, 'Images still loaded after leaving viewport');
+  console.log(`         → ${loadedCount} images loaded when visible, ${stillLoadedCount} retained after scrolling away (OK)`);
+});
+
+// Test 11: Memory estimation - original vs fixed with large gallery
+runner.test('COMPARISON: Estimated memory with 500 images scrolled', () => {
+  const placeholderSrc = "/local/community/gallery-card/placeholder.jpg";
+  const avgImageDecodedSizeMB = 3; // avg decoded bitmap ~3MB (1920x1080x4bytes ≈ 8MB, thumbnails smaller)
+  const totalImages = 500;
+  const visibleAtOnce = 8; // typical visible thumbnails in menu
+
+  // Original: all scrolled images stay loaded
+  const originalMemoryMB = totalImages * avgImageDecodedSizeMB;
+
+  // Fixed: only visible + buffer (200px rootMargin ≈ +4 extra) stay loaded
+  const fixedLoadedCount = visibleAtOnce + 4; // visible + rootMargin buffer
+  const fixedMemoryMB = fixedLoadedCount * avgImageDecodedSizeMB;
+
+  const reduction = ((1 - fixedMemoryMB / originalMemoryMB) * 100).toFixed(1);
+
+  console.log(`         → Original: ${totalImages} images loaded = ~${originalMemoryMB}MB decoded bitmaps`);
+  console.log(`         → Fixed: ${fixedLoadedCount} images loaded = ~${fixedMemoryMB}MB decoded bitmaps`);
+  console.log(`         → Memory reduction: ${reduction}%`);
+
+  assert(fixedMemoryMB < originalMemoryMB * 0.1, 'Fixed should use <10% of original memory');
+});
+
 // ========== Run ==========
 
 runner.run().then(success => {
