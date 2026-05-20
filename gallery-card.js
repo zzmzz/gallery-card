@@ -1,4 +1,4 @@
-var GalleryCardVersion="3.5.1";
+var GalleryCardVersion="3.5.2-fixed";
 
 import {
   LitElement,
@@ -21,9 +21,9 @@ class GalleryCard extends LitElement {
     };
   }
 
-  render() {    
+  render() {
     const menuAlignment = (this.config.menu_alignment || "responsive").toLowerCase();
-    
+
     return html`
         ${this.errors == undefined ? html`` :
          this.errors.map((error) => {
@@ -47,15 +47,15 @@ class GalleryCard extends LitElement {
                 html`<img @click="${ev => this._popupImage(ev)}" src="${this._currentResource().url}"/>` :
                 html`<video controls ?loop=${this.config.video_loop} ?autoplay=${this.config.video_autoplay} src="${this._currentResource().url}#t=0.1" @loadedmetadata="${ev => this._videoMetadataLoaded(ev)}" @canplay="${ev => this._startVideo(ev)}"  preload="metadata"></video>`
               }
-              <figcaption>${this._currentResource().caption} 
+              <figcaption>${this._currentResource().caption}
                 ${this._isImageExtension(this._currentResource().extension) ?
-                  html`` : html`<span class="duration"></span> ` }                  
+                  html`` : html`<span class="duration"></span> ` }
                 ${!(this.config.show_zoom ?? false) ?
-                  html`` : html`<a href= "${this._currentResource().url}" target="_blank">Zoom</a>` }                  
+                  html`` : html`<a href= "${this._currentResource().url}" target="_blank">Zoom</a>` }
               </figcaption>
-            </figure>  
-            <button class="btn btn-left" @click="${ev => this._selectResource(this.currentResourceIndex-1)}">&lt;</button> 
-            <button class="btn btn-right" @click="${ev => this._selectResource(this.currentResourceIndex+1)}">&gt;</button> 
+            </figure>
+            <button class="btn btn-left" @click="${ev => this._selectResource(this.currentResourceIndex-1)}">&lt;</button>
+            <button class="btn btn-right" @click="${ev => this._selectResource(this.currentResourceIndex+1)}">&gt;</button>
           </div>
           <div class="resource-menu">
             ${this.resources.map((resource, index) => {
@@ -86,9 +86,17 @@ class GalleryCard extends LitElement {
         </ha-card>
     `;
   }
- 
+
   _downloadingVideos = false;
+  _keyListenerAttached = false;
+  _slideshowTimer = null;
+  _boundKeyNav = null;
+  _boundModalClose = null;
+
   updated(changedProperties) {
+    // FIX: disconnect before re-observing to prevent accumulation
+    this.imageObserver.disconnect();
+
     const arr = this.shadowRoot.querySelectorAll('img.lzy_img')
     arr.forEach((v) => {
         this.imageObserver.observe(v);
@@ -97,25 +105,24 @@ class GalleryCard extends LitElement {
     varr.forEach((v) => {
         this.imageObserver.observe(v);
     })
-    // changedProperties.forEach((oldValue, propName) => {
-    //   console.log(`${propName} changed. oldValue: ${oldValue}`);
-    // });
-    
-    if (!this._downloadingVideos) 
+
+    if (!this._downloadingVideos)
       this._downloadNextMenuVideo();
   }
 
   async _downloadNextMenuVideo() {
     this._downloadingVideos = true;
     let v = this.shadowRoot.querySelector(".resource-menu figure video[data-src]");
-    
+
     if (v)
     {
       await new Promise(r => setTimeout(r, 100));
       var src = v.dataset.src;
       v.removeAttribute("data-src");
-      v.src = src;      
+      v.src = src;
       v.load();
+      // FIX: continue to next video in controlled chain
+      this._downloadNextMenuVideo();
     }
     else {
       this._downloadingVideos = false;
@@ -130,7 +137,6 @@ class GalleryCard extends LitElement {
         entries.forEach((entry) => {
             if (entry.isIntersecting) {
                 const lazyImage = entry.target
-                //console.log("lazy loading ", lazyImage)
                 lazyImage.src = lazyImage.dataset.src
             }
         })
@@ -148,15 +154,56 @@ class GalleryCard extends LitElement {
       delete this.config.entity;
     }
 
+    // FIX: create bound reference once for proper add/remove
+    if (!this._boundKeyNav) {
+      this._boundKeyNav = (ev) => this._keyNavigation(ev);
+    }
+
+    // FIX: create bound modal close handler once
+    if (!this._boundModalClose) {
+      this._boundModalClose = () => {
+        var modal = this.shadowRoot.getElementById("imageModal");
+        if (modal) modal.style.display = "none";
+      };
+    }
+
     if (this._hass !== undefined)
       this._loadResources(this._hass);
 
     this._doSlideShow(true);
   }
 
+  // FIX: cleanup all resources when component is removed from DOM
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._slideshowTimer) {
+      clearTimeout(this._slideshowTimer);
+      this._slideshowTimer = null;
+    }
+    if (this._keyListenerAttached) {
+      document.removeEventListener('keydown', this._boundKeyNav);
+      this._keyListenerAttached = false;
+    }
+    if (this.imageObserver) {
+      this.imageObserver.disconnect();
+    }
+  }
+
+  // FIX: re-attach listener if component is re-added to DOM
+  connectedCallback() {
+    super.connectedCallback();
+    if (this._boundKeyNav && !this._keyListenerAttached) {
+      const isPreview = this.parentNode && this.parentNode.tagName && this.parentNode.tagName.toLowerCase() == "hui-card-preview";
+      if (!isPreview && this.resources && this.resources.length > 0) {
+        document.addEventListener('keydown', this._boundKeyNav);
+        this._keyListenerAttached = true;
+      }
+    }
+  }
+
   set hass(hass) {
     this._hass = hass;
-    
+
     if (this.resources == null)
       this._loadResources(this._hass);
   }
@@ -176,7 +223,9 @@ class GalleryCard extends LitElement {
     if (this.config.slideshow_timer) {
       var time = parseInt(this.config.slideshow_timer);
       if (!isNaN(time) && time > 0) {
-        setTimeout(() => {this._doSlideShow();}, (time * 1000));
+        // FIX: clear previous timer before setting new one
+        if (this._slideshowTimer) clearTimeout(this._slideshowTimer);
+        this._slideshowTimer = setTimeout(() => {this._doSlideShow();}, (time * 1000));
       }
     }
   }
@@ -230,7 +279,7 @@ class GalleryCard extends LitElement {
   _videoMetadataLoaded(evt) {
     var showDuration = this.config.show_duration ?? true;
     if (!isNaN(parseInt(evt.target.duration)) && showDuration)
-      evt.target.parentNode.querySelector(".duration").innerHTML = "[" + this._getFormattedVideoDuration(evt.target.duration) + "]";    
+      evt.target.parentNode.querySelector(".duration").innerHTML = "[" + this._getFormattedVideoDuration(evt.target.duration) + "]";
 
     if (this.config.video_muted)
       evt.target.muted = "muted";
@@ -246,14 +295,13 @@ class GalleryCard extends LitElement {
   }
 
   _popupImage(evt) {
-    var modal = this.shadowRoot.getElementById("imageModal");    
+    var modal = this.shadowRoot.getElementById("imageModal");
     modal.style.display = "block";
     this._loadImageForPopup();
     modal.scrollIntoView(true);
 
-    modal.onclick = function() {
-      modal.style.display = "none";
-    }
+    // FIX: use stable bound handler instead of creating new function every click
+    modal.onclick = this._boundModalClose;
   }
 
   _loadImageForPopup() {
@@ -275,10 +323,10 @@ class GalleryCard extends LitElement {
     var seconds = parseInt(duration % 60);
     seconds = "0" + seconds;
     seconds = seconds.substring(seconds.length - 2);
-    
-    return minutes + ":" + seconds;    
-  }  
-  
+
+    return minutes + ":" + seconds;
+  }
+
   _keyNavigation(evt) {
     switch(evt.code) {
       case "ArrowDown":
@@ -294,42 +342,42 @@ class GalleryCard extends LitElement {
     }
   }
 
-  _handleTouchStart(evt) {                                         
-      this.xDown = evt.touches[0].clientX;                                      
-      this.yDown = evt.touches[0].clientY;                                      
-  }; 
-  
+  _handleTouchStart(evt) {
+      this.xDown = evt.touches[0].clientX;
+      this.yDown = evt.touches[0].clientY;
+  };
+
   _handleTouchMove(evt) {
       if ( ! this.xDown || ! this.yDown ) {
           return;
       }
-      var xUp = evt.touches[0].clientX;                                    
+      var xUp = evt.touches[0].clientX;
       var yUp = evt.touches[0].clientY;
       var xDiff = this.xDown - xUp;
       var yDiff = this.yDown - yUp;
-  
+
       if ( Math.abs( xDiff ) > Math.abs( yDiff ) ) {/*most significant*/
           if ( xDiff > 0 ) {
-          /* left swipe */ 
+          /* left swipe */
           this._selectResource(this.currentResourceIndex+1);
           evt.preventDefault();
           } else {
           /* right swipe */
           this._selectResource(this.currentResourceIndex-1);
           evt.preventDefault();
-          }                       
+          }
       } else {
           if ( yDiff > 0 ) {
-          /* up swipe */ 
-          } else { 
+          /* up swipe */
+          } else {
           /* down swipe */
-          }                                                                 
+          }
       }
       /* reset values */
       this.xDown = null;
-      this.yDown = null;                                            
+      this.yDown = null;
   };
-  
+
   _handleDateChange(event) {
     this.selectedDate = event.target.valueAsDate;
     this._loadResources(this._hass);
@@ -349,7 +397,7 @@ class GalleryCard extends LitElement {
     var folderFormat = this.config.folder_format;
     var fileNameFormat = this.config.file_name_format;
     var fileNameDateBegins = this.config.file_name_date_begins;
-    var captionFormat = this.config.caption_format;    
+    var captionFormat = this.config.caption_format;
     const parsedDateSort = this.config.parsed_date_sort ?? false;
     const reverseSort = this.config.reverse_sort ?? true;
     const randomSort = this.config.random_sort ?? false;
@@ -357,7 +405,7 @@ class GalleryCard extends LitElement {
 
     this.config.entities.forEach(entity => {
       var entityId;
-      var recursive = false;      
+      var recursive = false;
       var includeVideo = true;
       var includeImages = true;
       if (typeof entity === 'object') {
@@ -365,9 +413,9 @@ class GalleryCard extends LitElement {
         if (entity.recursive)
           recursive = entity.recursive;
         if (entity.include_video != undefined)
-          includeVideo = entity.include_video;          
+          includeVideo = entity.include_video;
         if (entity.include_images != undefined)
-          includeImages = entity.include_images;          
+          includeImages = entity.include_images;
         if (entity.folder_format)
           folderFormat = entity.folder_format;
         if (entity.file_name_format)
@@ -375,7 +423,7 @@ class GalleryCard extends LitElement {
         if (entity.file_name_date_begins)
           fileNameDateBegins = entity.file_name_date_begins;
         if (entity.caption_format)
-          captionFormat = entity.caption_format;          
+          captionFormat = entity.caption_format;
       }
       else {
         entityId = entity;
@@ -412,7 +460,7 @@ class GalleryCard extends LitElement {
     Promise.all(commands).then(resources => {
       this.resources = resources.filter(result => !result.error).flat(Infinity);
 
-      if (parsedDateSort) {        
+      if (parsedDateSort) {
         if (reverseSort) {
           this.resources.sort(function (x, y) { return y.date - x.date; });
         }
@@ -431,7 +479,6 @@ class GalleryCard extends LitElement {
       }
 
       if (maximumFilesTotal != undefined && !isNaN(maximumFilesTotal) && maximumFilesTotal < this.resources.length) {
-        //Keep only N total, but make sure camera resources remain
         this.resources = this.resources.filter(function(resource) {
           if (resource.isHass)
             return true;
@@ -445,9 +492,13 @@ class GalleryCard extends LitElement {
         }, {count: resources.filter(resource => resource.isHass).length});
       }
 
-      this.currentResourceIndex = 0; 
-      if (!(this.parentNode && this.parentNode.tagName && this.parentNode.tagName.toLowerCase() == "hui-card-preview")) {
-        document.addEventListener('keydown',ev=>this._keyNavigation(ev));
+      this.currentResourceIndex = 0;
+      // FIX: only attach keydown listener once using named reference
+      if (!this._keyListenerAttached) {
+        if (!(this.parentNode && this.parentNode.tagName && this.parentNode.tagName.toLowerCase() == "hui-card-preview")) {
+          document.addEventListener('keydown', this._boundKeyNav);
+          this._keyListenerAttached = true;
+        }
       }
 
       this.errors = [];
@@ -461,17 +512,17 @@ class GalleryCard extends LitElement {
   }
 
   _loadMediaResource(hass, contentId, maximumFiles, folderFormat, fileNameFormat, fileNameDateBegins, captionFormat, recursive, reverseSort, includeVideo, includeImages, filterForDate) {
-    return new Promise(async (resolve, reject) => {    
+    return new Promise(async (resolve, reject) => {
       var mediaPath = contentId;
       try {
         var values = [];
 
-        if (folderFormat && reverseSort && maximumFiles != undefined && !isNaN(maximumFiles)) {  //Can do more targeted folder searching under these conditions
+        if (folderFormat && reverseSort && maximumFiles != undefined && !isNaN(maximumFiles)) {
           var date = dayjs();
           var folderPrev = "";
           var failedPaths = [];
 
-          while (values.length < maximumFiles) {  
+          while (values.length < maximumFiles) {
             var folder = date.format(folderFormat);
             mediaPath = contentId + "/" + folder;
 
@@ -481,11 +532,11 @@ class GalleryCard extends LitElement {
                 values.push(...folderValues);
               }
               catch(e) {
-                if (e.code == 'browse_media_failed') 
+                if (e.code == 'browse_media_failed')
                   failedPaths.push(mediaPath);
                 else
                   throw e;
-              }              
+              }
             }
 
             if (failedPaths.length > 2) {
@@ -497,15 +548,15 @@ class GalleryCard extends LitElement {
             }
 
             folderPrev = folder;
-            date = date.subtract(12, 'hour');  //Allows for AM/PM folders
+            date = date.subtract(12, 'hour');
           }
 
           if (values.length > maximumFiles)
             values.length = maximumFiles;
         }
-        else 
-          values = await this._loadMedia(this, hass, mediaPath, maximumFiles, recursive, reverseSort, includeVideo, includeImages, filterForDate);        
-        
+        else
+          values = await this._loadMedia(this, hass, mediaPath, maximumFiles, recursive, reverseSort, includeVideo, includeImages, filterForDate);
+
         var resources = [];
         values.forEach(mediaItem => {
           var resource = this._createFileResource(mediaItem.authenticated_path, fileNameFormat, fileNameDateBegins, captionFormat);
@@ -513,9 +564,9 @@ class GalleryCard extends LitElement {
           if (resource !== undefined) {
             resources.push(resource);
           }
-        });   
+        });
         resolve(resources);
-      }     
+      }
       catch(e) {
         console.log(e);
         resolve({
@@ -524,7 +575,7 @@ class GalleryCard extends LitElement {
           message: e.message
         });
       }
-      
+
     });
   }
 
@@ -539,7 +590,7 @@ class GalleryCard extends LitElement {
     }
 
     return Promise.all(this._fetchMedia(ref, hass, mediaItem, recursive, includeVideo, includeImages, filterForDate))
-      .then(function(values) { 
+      .then(function(values) {
         var mediaItems = values
           .flat(Infinity)
           .filter(function(item) {return item !== undefined})
@@ -556,17 +607,17 @@ class GalleryCard extends LitElement {
 
         if (reverseSort)
           mediaItems.reverse();
-          
+
         if (maximumFiles != undefined && !isNaN(maximumFiles) && maximumFiles < mediaItems.length) {
           mediaItems.length = maximumFiles;
-        }        
+        }
 
         return Promise.all(mediaItems.map(function(mediaItem) {
           return ref._fetchMediaItem(hass, mediaItem.media_content_id)
             .then(function(auth) {
               return {
                 ...mediaItem,
-                authenticated_path: auth.url 
+                authenticated_path: auth.url
               };
             });
         }));
@@ -580,7 +631,7 @@ class GalleryCard extends LitElement {
       if (mediaItem.children) {
         commands.push(
           ...mediaItem.children
-          .filter(mediaItem => { 
+          .filter(mediaItem => {
             return ((includeVideo && mediaItem.media_class == "video") || (includeImages && mediaItem.media_class == "image") || (recursive && mediaItem.media_class == "directory" && (!filterForDate || (mediaItem.title ==  ref._folderDateFormatter((ref.config.search_date_folder_format == null)?"DD_MM_YYYY":ref.config.search_date_folder_format,ref.selectedDate) ) ))) && mediaItem.title != "@eaDir/";
           })
           .map(mediaItem => {
@@ -615,7 +666,7 @@ class GalleryCard extends LitElement {
     return hass.callWS({
       type: "media_source/resolve_media",
       media_content_id: mediaItemPath,
-      expires: (60 * 60 * 3)  //3 hours
+      expires: (60 * 60 * 3)
     })
   }
 
@@ -627,7 +678,7 @@ class GalleryCard extends LitElement {
       caption: camera.attributes.friendly_name ?? entityId,
       isHass: true
     }
-  
+
     return Promise.resolve(resource);
   }
 
@@ -645,14 +696,12 @@ class GalleryCard extends LitElement {
 
       files.forEach(file => {
         var filePath = file;
-        // /config/downloads/front_door/
-        // /config/www/...
         var fileUrl = filePath.replace("/config/www/", "/local/");
         if (filePath.indexOf("/config/www/") < 0)
           fileUrl = "/local/" + filePath.substring(filePath.indexOf("/www/")+5);
 
         var resource = this._createFileResource(fileUrl, fileNameFormat, fileNameDateBegins, captionFormat);
-        
+
         if (resource !== undefined) {
           resources.push(resource);
         }
@@ -679,11 +728,11 @@ class GalleryCard extends LitElement {
 
       if (captionFormat != " ")
         fileCaption = fileName;
-      
+
       var fileDatePart = fileName;
       if (fileNameDateBegins && !isNaN(parseInt(fileNameDateBegins)))
         fileDatePart = fileDatePart.substring(parseInt(fileNameDateBegins) - 1);
-      console.log(fileDatePart);
+
       if (fileNameFormat)
         date = dayjs(fileDatePart, fileNameFormat);
 
@@ -709,18 +758,18 @@ class GalleryCard extends LitElement {
 
     return resource;
   }
-  
+
   _folderDateFormatter(folderFormat, date ) {
     return dayjs(date).format(folderFormat);
   }
-  
+
   _formatDateForInput(date) {
       const yyyy = date.getFullYear();
       const mm = String(date.getMonth() + 1).padStart(2, '0');
       const dd = String(date.getDate()).padStart(2, '0');
       return `${yyyy}-${mm}-${dd}`;
   }
- 
+
 
   static get styles() {
     return css`
@@ -791,7 +840,7 @@ class GalleryCard extends LitElement {
           top: 33%;
         }
         .menu-responsive .resource-menu {
-          width:100%; 
+          width:100%;
           overflow-y: hidden;
           overflow-x: scroll;
           display: flex;
@@ -810,11 +859,11 @@ class GalleryCard extends LitElement {
         .menu-responsive .resource-viewer .btn {
           top: 40%;
         }
-                
+
         .menu-responsive .resource-menu {
-          width:25%; 
+          width:25%;
           height: calc(100vh - 120px);
-          overflow-y: scroll; 
+          overflow-y: scroll;
           float: right;
         }
       }
@@ -825,7 +874,7 @@ class GalleryCard extends LitElement {
         top: 33%;
       }
       .menu-bottom .resource-menu {
-        width:100%; 
+        width:100%;
         overflow-y: hidden;
         overflow-x: scroll;
         display: flex;
@@ -847,11 +896,11 @@ class GalleryCard extends LitElement {
       .menu-right .resource-viewer .btn {
         top: 40%;
       }
-              
+
       .menu-right .resource-menu {
-        width:25%; 
+        width:25%;
         height: calc(100vh - 120px);
-        overflow-y: scroll; 
+        overflow-y: scroll;
         float: right;
       }
       .menu-left .resource-viewer {
@@ -862,11 +911,11 @@ class GalleryCard extends LitElement {
       .menu-left .resource-viewer .btn {
         top: 40%;
       }
-              
+
       .menu-left .resource-menu {
-        width:25%; 
+        width:25%;
         height: calc(100vh - 120px);
-        overflow-y: scroll; 
+        overflow-y: scroll;
         float: left;
       }
       .menu-left .btn-reload {
@@ -885,7 +934,7 @@ class GalleryCard extends LitElement {
         top: 45%;
       }
       .menu-top .resource-menu {
-        width:100%; 
+        width:100%;
         overflow-y: hidden;
         overflow-x: scroll;
         display: flex;
@@ -907,7 +956,7 @@ class GalleryCard extends LitElement {
         top: 33%;
       }
       .menu-hidden .resource-menu {
-        width:100%; 
+        width:100%;
         overflow-y: hidden;
         overflow-x: scroll;
         display: none;
@@ -971,6 +1020,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "gallery-card",
   name: "Gallery Card",
-  preview: false, // Optional - defaults to false
-  description: "The Gallery Card allows for viewing multiple images/videos.  Requires the Files sensor availble at https://github.com/TarheelGrad1998" // Optional
+  preview: false,
+  description: "The Gallery Card allows for viewing multiple images/videos.  Requires the Files sensor availble at https://github.com/TarheelGrad1998"
 });
