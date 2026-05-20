@@ -69,7 +69,7 @@ class GalleryCard extends LitElement {
                           .cameraView=${"live"}
                         ></hui-image>` :
                       this._isImageExtension(resource.extension) ?
-                      html`<img class="lzy_img" src="/local/community/gallery-card/placeholder.jpg" data-src="${resource.url}"/>` :
+                      html`<img class="lzy_img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="${resource.url}"/>` :
                         (this.config.video_preload ?? true) ?
                         html`<video preload="none" data-src="${resource.url}#t=${(this.config.preview_video_at == null) ? 0.1 : this.config.preview_video_at }" @loadedmetadata="${ev => this._videoMetadataLoaded(ev)}" @canplay="${ev => this._downloadNextMenuVideo()}" preload="metadata"></video>` :
                           html`<center><div class="lzy_img"><ha-icon id="play" icon="mdi:movie-play-outline"></ha-icon></div></center>`
@@ -133,7 +133,8 @@ class GalleryCard extends LitElement {
     dayjs.extend(dayjs_plugin_customParseFormat);
     dayjs.extend(dayjs_plugin_relativeTime);
 
-    this._placeholderSrc = "/local/community/gallery-card/placeholder.jpg";
+    // 1x1 透明 gif，无需外部文件
+    this._placeholderSrc = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
     // rootMargin 上下各扩展 200px，避免快速滚动时反复加载/卸载造成闪烁
     this.imageObserver = new IntersectionObserver((entries, imgObserver) => {
         entries.forEach((entry) => {
@@ -177,8 +178,6 @@ class GalleryCard extends LitElement {
 
     if (this._hass !== undefined)
       this._loadResources(this._hass);
-
-    this._doSlideShow(true);
   }
 
   // FIX: cleanup all resources when component is removed from DOM
@@ -507,6 +506,13 @@ class GalleryCard extends LitElement {
           document.addEventListener('keydown', this._boundKeyNav);
           this._keyListenerAttached = true;
         }
+      }
+
+      // FIX: 数据就绪后启动 slideshow（清除之前可能存在的空跑定时器）
+      if (this._slideshowTimer) clearTimeout(this._slideshowTimer);
+      this._slideshowTimer = null;
+      if (this.resources.length > 0) {
+        this._doSlideShow(true);
       }
 
       this.errors = [];
